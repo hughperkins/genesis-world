@@ -1,10 +1,10 @@
-"""Run with: python -m unittest discover -s tests_ci_security -v."""
+"""Run with: python -m pytest -c tests_ci_security/pytest.ini tests_ci_security."""
 
 import copy
 import io
 import importlib.util
 import json
-import unittest
+import pytest
 import urllib.error
 from collections.abc import Callable, Sequence
 from contextlib import redirect_stdout
@@ -16,7 +16,6 @@ SCRIPT_PATH = Path(__file__).resolve().parents[1] / ".github/workflows/scripts/v
 spec = importlib.util.spec_from_file_location("validate_quadrants_pr", SCRIPT_PATH)
 validator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validator)
-
 UPSTREAM = {
     "id": 1,
     "full_name": "Genesis-Embodied-AI/quadrants",
@@ -65,190 +64,195 @@ def fixture(
             for pull in [top, *others]
             if pull["head"]["repo"]["owner"]["login"] == "Genesis-Embodied-AI"
             and pull["head"]["ref"] == branch
-            and pull["state"] == "open"
+            and (pull["state"] == "open")
         ]
 
-    return event, fetch, calls
+    return (event, fetch, calls)
 
 
-class StackValidationTests(unittest.TestCase):
-    def check(self, top: dict[str, Any], others: Sequence[dict[str, Any]] = ()) -> bool:
-        """Run the validator against a triggering PR and its available parent PRs."""
-        event, fetch, _ = fixture(top, others)
-        with (
-            patch.object(validator, "list_pulls", side_effect=fetch),
-            patch.object(validator, "github_get", return_value=top),
-        ):
-            return validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+def check(top: dict[str, Any], others: Sequence[dict[str, Any]] = ()) -> bool:
+    """Run the validator against a triggering PR and its available parent PRs."""
+    event, fetch, _ = fixture(top, others)
+    with (
+        patch.object(validator, "list_pulls", side_effect=fetch),
+        patch.object(validator, "github_get", return_value=top),
+    ):
+        return validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
-    def test_default_branch_pr(self) -> None:
-        """Accept an upstream PR targeting the default branch without a parent lookup."""
-        self.assertTrue(self.check(pr(1, "topic", "main")))
 
-    def test_three_level_internal_stack(self) -> None:
-        """Fetch the triggering PR directly and walk only its parent branches to main."""
-        top = pr(3, "top", "middle")
-        event, fetch, calls = fixture(top, [pr(2, "middle", "bottom"), pr(1, "bottom", "main")])
-        with (
-            patch.object(validator, "list_pulls", side_effect=fetch),
-            patch.object(validator, "github_get", return_value=top) as get,
-        ):
-            self.assertTrue(validator.validate_quadrants_pr(event, UPSTREAM["full_name"]))
-            get.assert_called_once_with(UPSTREAM["full_name"], "pulls/3")
-        self.assertEqual(calls, ["middle", "bottom"])
+def test_default_branch_pr() -> None:
+    """Accept an upstream PR targeting the default branch without a parent lookup."""
+    assert check(pr(1, "topic", "main"))
 
-    def test_fork_at_top(self) -> None:
-        """Reject a stacked PR from a fork even when its parent branch is upstream."""
-        top = pr(2, "top", "bottom")
-        top["head"]["repo"] = FORK
-        with self.assertRaisesRegex(ValueError, "source repository must be Genesis-Embodied-AI/quadrants, not a fork"):
-            self.check(top, [pr(1, "bottom", "main")])
 
-    def test_same_owner_fork_parent(self) -> None:
-        """Reject a parent from a different repository even when its owner matches upstream."""
-        parent = pr(1, "bottom", "main")
-        parent["head"]["repo"] = {**FORK, "owner": UPSTREAM["owner"], "full_name": "Genesis-Embodied-AI/quadrants-fork"}
-        with self.assertRaisesRegex(ValueError, "PR #1 originates from Genesis-Embodied-AI/quadrants-fork"):
-            self.check(pr(2, "top", "bottom"), [parent])
+def test_three_level_internal_stack() -> None:
+    """Fetch the triggering PR directly and walk only its parent branches to main."""
+    top = pr(3, "top", "middle")
+    event, fetch, calls = fixture(top, [pr(2, "middle", "bottom"), pr(1, "bottom", "main")])
+    with (
+        patch.object(validator, "list_pulls", side_effect=fetch),
+        patch.object(validator, "github_get", return_value=top) as get,
+    ):
+        assert validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+        get.assert_called_once_with(UPSTREAM["full_name"], "pulls/3")
+    assert calls == ["middle", "bottom"]
 
-    def test_unresolved_or_closed_parents(self) -> None:
-        """Reject stacks with no open parent PR for the base branch."""
-        for others in [[], [pr(1, "bottom", "main", state="closed")]]:
-            with self.subTest(others=others):
-                with self.assertRaisesRegex(ValueError, "no open parent PR found.*bottom"):
-                    self.check(pr(2, "top", "bottom"), others)
 
-    def test_ambiguous_parents(self) -> None:
-        """Reject a base branch associated with more than one open parent PR."""
-        with self.assertRaisesRegex(ValueError, "multiple open parent PRs found.*bottom"):
-            self.check(pr(3, "top", "bottom"), [pr(1, "bottom", "main"), pr(2, "bottom", "other")])
+def test_fork_at_top() -> None:
+    """Reject a stacked PR from a fork even when its parent branch is upstream."""
+    top = pr(2, "top", "bottom")
+    top["head"]["repo"] = FORK
+    with pytest.raises(ValueError, match="source repository must be Genesis-Embodied-AI/quadrants, not a fork"):
+        check(top, [pr(1, "bottom", "main")])
 
-    def test_cycles(self) -> None:
-        """Reject parent chains that revisit an already validated PR."""
-        with self.assertRaisesRegex(ValueError, "cycle detected at PR #2"):
-            self.check(pr(2, "top", "bottom"), [pr(1, "bottom", "top")])
 
-    def test_parent_commit_changed(self) -> None:
-        """Reject a parent whose head commit differs from the child PR base commit."""
-        parent = pr(1, "bottom", "main")
-        parent["head"]["sha"] = "new-sha"
-        with self.assertRaisesRegex(ValueError, "base branch 'bottom' changed"):
-            self.check(pr(2, "top", "bottom"), [parent])
+def test_same_owner_fork_parent() -> None:
+    """Reject a parent from a different repository even when its owner matches upstream."""
+    parent = pr(1, "bottom", "main")
+    parent["head"]["repo"] = {**FORK, "owner": UPSTREAM["owner"], "full_name": "Genesis-Embodied-AI/quadrants-fork"}
+    with pytest.raises(ValueError, match="PR #1 originates from Genesis-Embodied-AI/quadrants-fork"):
+        check(pr(2, "top", "bottom"), [parent])
 
-    def test_parent_targets_other_repository(self) -> None:
-        """Reject a parent PR whose target repository is not upstream."""
-        parent = pr(1, "bottom", "main")
-        parent["base"]["repo"] = FORK
-        with self.assertRaisesRegex(ValueError, "PR #1 targets a repository other than Genesis-Embodied-AI/quadrants"):
-            self.check(pr(2, "top", "bottom"), [parent])
 
-    @patch.dict("os.environ", {"GITHUB_TOKEN": "test-token"})
-    def test_api_failure_context(self) -> None:
-        """Verify a parent lookup failure identifies its branch and stops stack validation."""
-        top = pr(2, "top", "bottom")
-        event, _, _ = fixture(top)
-        errors = [
-            OSError("Connection failed"),
-            urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None),
-        ]
-        for error in errors:
-            with self.subTest(error=error):
-                with patch.object(validator.urllib.request, "urlopen") as urlopen:
-                    urlopen.side_effect = [io.StringIO(json.dumps(top)), error]
-                    with self.assertRaisesRegex(ValueError, "GitHub API lookup.*bottom.*failed"):
-                        validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+def test_unresolved_or_closed_parents() -> None:
+    """Reject stacks with no open parent PR for the base branch."""
+    for others in [[], [pr(1, "bottom", "main", state="closed")]]:
+        with pytest.raises(ValueError, match="no open parent PR found.*bottom"):
+            check(pr(2, "top", "bottom"), others)
 
-    def test_closed_and_merged_top(self) -> None:
-        """Verify closed triggering PRs are intentionally skipped, whether merged or not."""
-        for merged_at in [None, "2026-11-05T00:00:00Z"]:
-            with self.subTest(merged_at=merged_at):
-                self.assertFalse(self.check(pr(1, "topic", "main", state="closed", merged_at=merged_at)))
 
-    def test_missing_or_ambiguous_triggering_pr(self) -> None:
-        """Reject events without exactly one PR number instead of searching by source branch."""
-        for prs in [[], [{"number": 1}, {"number": 2}]]:
-            with self.subTest(prs=prs):
-                event, _, _ = fixture(pr(1, "topic", "main"))
-                event["workflow_run"]["pull_requests"] = prs
-                with self.assertRaisesRegex(ValueError, "Expected exactly one triggering Quadrants PR"):
-                    validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+def test_ambiguous_parents() -> None:
+    """Reject a base branch associated with more than one open parent PR."""
+    with pytest.raises(ValueError, match="multiple open parent PRs found.*bottom"):
+        check(pr(3, "top", "bottom"), [pr(1, "bottom", "main"), pr(2, "bottom", "other")])
 
-    def test_fork_targeting_main(self) -> None:
-        """Reject fork sources even when their PR targets main."""
-        top = pr(1, "topic", "main")
-        top["head"]["repo"] = FORK
-        with self.assertRaisesRegex(ValueError, "not a fork"):
-            self.check(top)
 
-    def test_wrong_event_repository(self) -> None:
-        """Reject a payload from another repository even when its source metadata claims to be upstream."""
+def test_cycles() -> None:
+    """Reject parent chains that revisit an already validated PR."""
+    with pytest.raises(ValueError, match="cycle detected at PR #2"):
+        check(pr(2, "top", "bottom"), [pr(1, "bottom", "top")])
+
+
+def test_parent_commit_changed() -> None:
+    """Reject a parent whose head commit differs from the child PR base commit."""
+    parent = pr(1, "bottom", "main")
+    parent["head"]["sha"] = "new-sha"
+    with pytest.raises(ValueError, match="base branch 'bottom' changed"):
+        check(pr(2, "top", "bottom"), [parent])
+
+
+def test_parent_targets_other_repository() -> None:
+    """Reject a parent PR whose target repository is not upstream."""
+    parent = pr(1, "bottom", "main")
+    parent["base"]["repo"] = FORK
+    with pytest.raises(ValueError, match="PR #1 targets a repository other than Genesis-Embodied-AI/quadrants"):
+        check(pr(2, "top", "bottom"), [parent])
+
+
+@patch.dict("os.environ", {"GITHUB_TOKEN": "test-token"})
+def test_api_failure_context() -> None:
+    """Verify a parent lookup failure identifies its branch and stops stack validation."""
+    top = pr(2, "top", "bottom")
+    event, _, _ = fixture(top)
+    errors = [
+        OSError("Connection failed"),
+        urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None),
+    ]
+    for error in errors:
+        with patch.object(validator.urllib.request, "urlopen") as urlopen:
+            urlopen.side_effect = [io.StringIO(json.dumps(top)), error]
+            with pytest.raises(ValueError, match="GitHub API lookup.*bottom.*failed"):
+                validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+
+
+def test_closed_and_merged_top() -> None:
+    """Verify closed triggering PRs are intentionally skipped, whether merged or not."""
+    for merged_at in [None, "2026-11-05T00:00:00Z"]:
+        assert not check(pr(1, "topic", "main", state="closed", merged_at=merged_at))
+
+
+def test_missing_or_ambiguous_triggering_pr() -> None:
+    """Reject events without exactly one PR number instead of searching by source branch."""
+    for prs in [[], [{"number": 1}, {"number": 2}]]:
         event, _, _ = fixture(pr(1, "topic", "main"))
-        event["repository"] = FORK
-        with self.assertRaisesRegex(ValueError, "Expected a workflow event from"):
+        event["workflow_run"]["pull_requests"] = prs
+        with pytest.raises(ValueError, match="Expected exactly one triggering Quadrants PR"):
             validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
-    def test_invalid_pr_number(self) -> None:
-        """Reject nonnumeric and invalid PR identifiers before constructing an API endpoint."""
-        for number in ["../other", 0, -1, True]:
-            with self.subTest(number=number):
-                event, _, _ = fixture(pr(1, "topic", "main"))
-                event["workflow_run"]["pull_requests"] = [{"number": number}]
-                with self.assertRaisesRegex(ValueError, "Invalid triggering Quadrants PR number"):
-                    validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
-    def test_api_pr_repository_mismatch(self) -> None:
-        """Reject PR source or target repository mismatches in the direct API response."""
-        for side in ["head", "base"]:
-            with self.subTest(side=side):
-                top = pr(1, "topic", "main")
-                event, _, _ = fixture(top)
-                wrong = copy.deepcopy(top)
-                wrong[side]["repo"] = FORK
-                with patch.object(validator, "github_get", return_value=wrong):
-                    with self.assertRaisesRegex(ValueError, "repository must be Genesis-Embodied-AI/quadrants"):
-                        validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
-
-    def test_stale_commit_and_wrong_event(self) -> None:
-        """Reject outdated triggering commits and events that are not pull requests."""
-        for field, value, error in [
-            ("head_sha", "old-sha", "no longer matches the triggering branch and commit old-sha"),
-            ("event", "push", "Started by 'push'"),
-        ]:
-            with self.subTest(field=field):
-                top = pr(1, "topic", "main")
-                event, _, _ = fixture(top)
-                event["workflow_run"][field] = value
-                with self.assertRaisesRegex(ValueError, error):
-                    with patch.object(validator, "github_get", return_value=top):
-                        validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+def test_fork_targeting_main() -> None:
+    """Reject fork sources even when their PR targets main."""
+    top = pr(1, "topic", "main")
+    top["head"]["repo"] = FORK
+    with pytest.raises(ValueError, match="not a fork"):
+        check(top)
 
 
-class ApiAndCommandTests(unittest.TestCase):
-    @patch.dict(
-        "os.environ",
-        {
-            "GITHUB_EVENT_PATH": "event.json",
-            "QUADRANTS_REPOSITORY": "Genesis-Embodied-AI/quadrants",
-            "GITHUB_OUTPUT": "output",
-        },
-    )
-    def test_command_failure_does_not_emit_skip(self) -> None:
-        """Verify validation failure exits nonzero and emits an error without a skip output."""
-        with (
-            patch.object(validator.Path, "read_text", return_value='{"workflow_run": {"event": "push"}}'),
-            patch.object(validator.Path, "open", mock_open()) as output,
-            redirect_stdout(io.StringIO()) as stdout,
-        ):
-            self.assertEqual(validator.main(), 1)
-            output.assert_not_called()
-            self.assertIn("::error::Started by 'push'", stdout.getvalue())
-
-    def test_annotation_escaping(self) -> None:
-        """Verify annotation messages cannot inject additional workflow commands."""
-        with redirect_stdout(io.StringIO()) as stdout:
-            validator.print_github_annotation("error", "Failed 100%\r\n::notice::not a separate command")
-        self.assertEqual(stdout.getvalue(), "::error::Failed 100%25%0D%0A::notice::not a separate command\n")
+def test_wrong_event_repository() -> None:
+    """Reject a payload from another repository even when its source metadata claims to be upstream."""
+    event, _, _ = fixture(pr(1, "topic", "main"))
+    event["repository"] = FORK
+    with pytest.raises(ValueError, match="Expected a workflow event from"):
+        validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_invalid_pr_number() -> None:
+    """Reject nonnumeric and invalid PR identifiers before constructing an API endpoint."""
+    for number in ["../other", 0, -1, True]:
+        event, _, _ = fixture(pr(1, "topic", "main"))
+        event["workflow_run"]["pull_requests"] = [{"number": number}]
+        with pytest.raises(ValueError, match="Invalid triggering Quadrants PR number"):
+            validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+
+
+def test_api_pr_repository_mismatch() -> None:
+    """Reject PR source or target repository mismatches in the direct API response."""
+    for side in ["head", "base"]:
+        top = pr(1, "topic", "main")
+        event, _, _ = fixture(top)
+        wrong = copy.deepcopy(top)
+        wrong[side]["repo"] = FORK
+        with patch.object(validator, "github_get", return_value=wrong):
+            with pytest.raises(ValueError, match="repository must be Genesis-Embodied-AI/quadrants"):
+                validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+
+
+def test_stale_commit_and_wrong_event() -> None:
+    """Reject outdated triggering commits and events that are not pull requests."""
+    for field, value, error in [
+        ("head_sha", "old-sha", "no longer matches the triggering branch and commit old-sha"),
+        ("event", "push", "Started by 'push'"),
+    ]:
+        top = pr(1, "topic", "main")
+        event, _, _ = fixture(top)
+        event["workflow_run"][field] = value
+        with pytest.raises(ValueError, match=error):
+            with patch.object(validator, "github_get", return_value=top):
+                validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+
+
+@patch.dict(
+    "os.environ",
+    {
+        "GITHUB_EVENT_PATH": "event.json",
+        "QUADRANTS_REPOSITORY": "Genesis-Embodied-AI/quadrants",
+        "GITHUB_OUTPUT": "output",
+    },
+)
+def test_command_failure_does_not_emit_skip() -> None:
+    """Verify validation failure exits nonzero and emits an error without a skip output."""
+    with (
+        patch.object(validator.Path, "read_text", return_value='{"workflow_run": {"event": "push"}}'),
+        patch.object(validator.Path, "open", mock_open()) as output,
+        redirect_stdout(io.StringIO()) as stdout,
+    ):
+        assert validator.main() == 1
+        output.assert_not_called()
+        assert "::error::Started by 'push'" in stdout.getvalue()
+
+
+def test_annotation_escaping() -> None:
+    """Verify annotation messages cannot inject additional workflow commands."""
+    with redirect_stdout(io.StringIO()) as stdout:
+        validator.print_github_annotation("error", "Failed 100%\r\n::notice::not a separate command")
+    assert stdout.getvalue() == "::error::Failed 100%25%0D%0A::notice::not a separate command\n"
