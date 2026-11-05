@@ -105,9 +105,9 @@ def check_calling_workflow(
 
     This subset identifies the source branch and commit. The PR API supplies the base branch used to walk the stack.
     """
-    run = event.get("workflow_run") or {}
-    if run.get("event") != "pull_request":
-        event_name = run.get("event") or os.environ.get("GITHUB_EVENT_NAME", "unknown")
+    workflow_run = event.get("workflow_run") or {}
+    if workflow_run.get("event") != "pull_request":
+        event_name = workflow_run.get("event") or os.environ.get("GITHUB_EVENT_NAME", "unknown")
         raise ValueError(f"Started by '{event_name}', where a pull request alone is served.")
     repository = event["repository"]
     default_branch = repository["default_branch"]
@@ -120,25 +120,28 @@ def check_calling_workflow(
         except Exception as error:
             raise ValueError(f"Stack validation failed: GitHub API lookup for '{head}' failed: {error}") from error
 
-    pulls = lookup(f"{run['head_repository']['owner']['login']}:{run['head_branch']}", "all")
+    pulls = lookup(f"{workflow_run['head_repository']['owner']['login']}:{workflow_run['head_branch']}", "all")
     matching = [
         pull
         for pull in pulls
-        if pull["head"]["sha"] == run["head_sha"]
-        and pull["head"]["ref"] == run["head_branch"]
-        and (pull["head"].get("repo") or {}).get("id") == run["head_repository"]["id"]
+        if pull["head"]["sha"] == workflow_run["head_sha"]
+        and pull["head"]["ref"] == workflow_run["head_branch"]
+        and (pull["head"].get("repo") or {}).get("id") == workflow_run["head_repository"]["id"]
     ]
     open_pulls = [pull for pull in matching if pull["state"] == "open"]
     if len(open_pulls) > 1:
         numbers = ", ".join(f"#{pull['number']}" for pull in open_pulls)
-        raise ValueError(f"Stack validation failed: multiple open PRs head commit {run['head_sha']}: {numbers}.")
+        raise ValueError(
+            f"Stack validation failed: multiple open PRs head commit {workflow_run['head_sha']}: {numbers}."
+        )
     if not matching:
-        raise ValueError(f"Commit {run['head_sha']} heads no pull request in {repository_name}.")
+        raise ValueError(f"Commit {workflow_run['head_sha']} heads no pull request in {repository_name}.")
     pull = (open_pulls or matching)[0]
     if pull["state"] != "open":
         status = "merged" if pull.get("merged_at") else "closed without merging"
         print_github_annotation(
-            "notice", f"Pull request #{pull['number']} is {status}, so its commit {run['head_sha']} is left untested."
+            "notice",
+            f"Pull request #{pull['number']} is {status}, so its commit {workflow_run['head_sha']} is left untested.",
         )
         return False
 
