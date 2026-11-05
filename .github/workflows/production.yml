@@ -91,7 +91,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 .github/workflows/scripts/check_calling_workflow.py
+          python3 .github/workflows/scripts/validate_quadrants_pr.py
           echo "WORKFLOW_VALIDATED=true" >> "$GITHUB_ENV"
 
       - name: Require a validated workflow
