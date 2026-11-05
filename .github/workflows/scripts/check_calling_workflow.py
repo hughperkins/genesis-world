@@ -53,7 +53,7 @@ def list_pulls(repository: str, head: str, state: str) -> list[dict[str, Any]]:
         page += 1
 
 
-def emit_github_annotation(level: str, message: object) -> None:
+def print_github_annotation(level: str, message: object) -> None:
     """Print a message in GitHub Actions' workflow-command format so it appears in the workflow UI.
 
     ``level`` selects the annotation type, such as ``error`` or ``notice``. For example, an error is printed as
@@ -106,7 +106,7 @@ def check_calling_workflow(
     pull = (open_pulls or matching)[0]
     if pull["state"] != "open":
         status = "merged" if pull.get("merged_at") else "closed without merging"
-        emit_github_annotation(
+        print_github_annotation(
             "notice", f"Pull request #{pull['number']} is {status}, so its commit {run['head_sha']} is left untested."
         )
         return False
@@ -159,7 +159,7 @@ def main() -> int:
         with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
             output.write(f"is_open={str(is_open).lower()}\n")
     except Exception as error:
-        emit_github_annotation("error", error)
+        print_github_annotation("error", error)
         return 1
     return 0
 
