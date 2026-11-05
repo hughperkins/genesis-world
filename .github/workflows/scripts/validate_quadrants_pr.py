@@ -9,14 +9,10 @@ from pathlib import Path
 from typing import Any
 
 
-QUADRANTS_REPOSITORY = "Genesis-Embodied-AI/quadrants"
-QUADRANTS_OWNER = "Genesis-Embodied-AI"
-
-
-def github_get(endpoint: str) -> Any:
+def github_get(quadrants_repository: str, endpoint: str) -> Any:
     """Read a JSON endpoint in upstream Quadrants and identify that endpoint if the API request fails."""
     try:
-        url = f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com')}/repos/{QUADRANTS_REPOSITORY}/{endpoint}"
+        url = f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com')}/repos/{quadrants_repository}/{endpoint}"
         request = urllib.request.Request(
             url,
             headers={
@@ -31,7 +27,7 @@ def github_get(endpoint: str) -> Any:
         raise ValueError(f"Stack validation failed: GitHub API lookup for '{endpoint}' failed: {error}") from error
 
 
-def list_pulls(branch: str) -> list[dict[str, Any]]:
+def list_pulls(quadrants_repository: str, branch: str) -> list[dict[str, Any]]:
     """Fetch all open PRs whose source is the named upstream Quadrants branch, across all API pages.
 
     Q: Matching what?
@@ -50,13 +46,12 @@ def list_pulls(branch: str) -> list[dict[str, Any]]:
     A: GitHub accepts open, closed, or all; merged PRs count as closed. Parent lookups always use open. The triggering
        PR is fetched by number, which also returns closed PRs, allowing an intentional skip if it closed during the build.
     """
+    owner = quadrants_repository.split("/", 1)[0]
     pulls = []
     page = 1
     while True:
-        query = urllib.parse.urlencode(
-            {"head": f"{QUADRANTS_OWNER}:{branch}", "state": "open", "per_page": 100, "page": page}
-        )
-        batch = github_get(f"pulls?{query}")
+        query = urllib.parse.urlencode({"head": f"{owner}:{branch}", "state": "open", "per_page": 100, "page": page})
+        batch = github_get(quadrants_repository, f"pulls?{query}")
         pulls.extend(batch)
         if len(batch) < 100:
             return pulls
@@ -78,8 +73,11 @@ def print_github_annotation(level: str, message: object) -> None:
     print(f"::{level}::{message}")
 
 
-def validate_quadrants_pr(event: dict[str, Any]) -> bool:
+def validate_quadrants_pr(event: dict[str, Any], quadrants_repository: str) -> bool:
     """Return whether the PR is open; reject stacks that violate restrictions or cannot be traced to the default branch.
+
+    ``quadrants_repository`` comes from the workflow after its exact caller-repository check, not from PR data. Its owner
+    is derived from the repository name for parent lookups.
 
     A stack is rejected if:
     - A PR's source or target repository is not the calling upstream repository.
@@ -119,12 +117,12 @@ def validate_quadrants_pr(event: dict[str, Any]) -> bool:
         event_name = workflow_run.get("event") or os.environ.get("GITHUB_EVENT_NAME", "unknown")
         raise ValueError(f"Started by '{event_name}', where a pull request alone is served.")
     repository = event["repository"]
+    if repository["full_name"] != quadrants_repository:
+        raise ValueError(f"Expected a workflow event from {quadrants_repository}, got {repository['full_name']}.")
     default_branch = repository["default_branch"]
-    if repository["full_name"] != QUADRANTS_REPOSITORY:
-        raise ValueError(f"Expected a workflow event from {QUADRANTS_REPOSITORY}, got {repository['full_name']}.")
     source = workflow_run.get("head_repository") or {}
-    if source.get("id") != repository["id"] or source.get("full_name") != QUADRANTS_REPOSITORY:
-        raise ValueError(f"Quadrants PR rejected: source repository must be {QUADRANTS_REPOSITORY}, not a fork.")
+    if source.get("id") != repository["id"] or source.get("full_name") != quadrants_repository:
+        raise ValueError(f"Quadrants PR rejected: source repository must be {quadrants_repository}, not a fork.")
     triggering_prs = workflow_run.get("pull_requests") or []
     if len(triggering_prs) != 1:
         raise ValueError(
@@ -133,7 +131,7 @@ def validate_quadrants_pr(event: dict[str, Any]) -> bool:
     number = triggering_prs[0]["number"]
     if type(number) is not int or number <= 0:
         raise ValueError(f"Invalid triggering Quadrants PR number: {number!r}.")
-    pull = github_get(f"pulls/{number}")
+    pull = github_get(quadrants_repository, f"pulls/{number}")
     if (
         pull["number"] != number
         or pull["head"]["sha"] != workflow_run["head_sha"]
@@ -141,9 +139,9 @@ def validate_quadrants_pr(event: dict[str, Any]) -> bool:
     ):
         raise ValueError(f"PR #{number} no longer matches the triggering branch and commit {workflow_run['head_sha']}.")
     if (pull["head"].get("repo") or {}).get("id") != repository["id"]:
-        raise ValueError(f"PR #{number} source repository must be {QUADRANTS_REPOSITORY}.")
+        raise ValueError(f"PR #{number} source repository must be {quadrants_repository}.")
     if (pull["base"].get("repo") or {}).get("id") != repository["id"]:
-        raise ValueError(f"PR #{number} target repository must be {QUADRANTS_REPOSITORY}.")
+        raise ValueError(f"PR #{number} target repository must be {quadrants_repository}.")
     if pull["state"] != "open":
         status = "merged" if pull.get("merged_at") else "closed without merging"
         print_github_annotation(
@@ -163,15 +161,15 @@ def validate_quadrants_pr(event: dict[str, Any]) -> bool:
         head_repo = head.get("repo") or {}
         if head_repo.get("id") != repository["id"]:
             source = head_repo.get("full_name") or "a missing repository"
-            raise ValueError(f"Stack rejected: PR #{number} originates from {source}; expected {QUADRANTS_REPOSITORY}.")
+            raise ValueError(f"Stack rejected: PR #{number} originates from {source}; expected {quadrants_repository}.")
         if (base.get("repo") or {}).get("id") != repository["id"]:
-            raise ValueError(f"Stack rejected: PR #{number} targets a repository other than {QUADRANTS_REPOSITORY}.")
+            raise ValueError(f"Stack rejected: PR #{number} targets a repository other than {quadrants_repository}.")
         print(f"Stack PR #{number}: {head['ref']} -> {base['ref']}")
         if base["ref"] == default_branch:
             break
         parents = [
             parent
-            for parent in list_pulls(base["ref"])
+            for parent in list_pulls(quadrants_repository, base["ref"])
             if parent["head"]["ref"] == base["ref"] and parent["state"] == "open"
         ]
         if len(parents) != 1:
@@ -194,7 +192,7 @@ def main() -> int:
     """Read the Actions event, emit eligibility on success, and report failures with a nonzero exit code."""
     try:
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-        is_open = validate_quadrants_pr(event)
+        is_open = validate_quadrants_pr(event, os.environ["QUADRANTS_REPOSITORY"])
         with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
             output.write(f"is_open={str(is_open).lower()}\n")
     except Exception as error:

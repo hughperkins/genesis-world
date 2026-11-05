@@ -42,7 +42,7 @@ def pr(number: int, branch: str, base: str, **options: Any) -> dict[str, Any]:
 
 def fixture(
     top: dict[str, Any], others: Sequence[dict[str, Any]] = ()
-) -> tuple[dict[str, Any], Callable[[str], list[dict[str, Any]]], list[str]]:
+) -> tuple[dict[str, Any], Callable[[str, str], list[dict[str, Any]]], list[str]]:
     """Build a workflow event and an in-memory PR lookup that records queried branches."""
     event = {
         "repository": UPSTREAM,
@@ -56,8 +56,10 @@ def fixture(
     }
     calls = []
 
-    def fetch(branch: str) -> list[dict[str, Any]]:
+    def fetch(repository: str, branch: str) -> list[dict[str, Any]]:
         """Return open fixture PRs matching an upstream-owned parent branch."""
+        if repository != UPSTREAM["full_name"]:
+            raise AssertionError(f"Unexpected repository: {repository}")
         calls.append(branch)
         return [
             pull
@@ -78,7 +80,7 @@ class StackValidationTests(unittest.TestCase):
             patch.object(validator, "list_pulls", side_effect=fetch),
             patch.object(validator, "github_get", return_value=top),
         ):
-            return validator.validate_quadrants_pr(event)
+            return validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
     def test_default_branch_pr(self) -> None:
         """Accept an upstream PR targeting the default branch without a parent lookup."""
@@ -92,8 +94,8 @@ class StackValidationTests(unittest.TestCase):
             patch.object(validator, "list_pulls", side_effect=fetch),
             patch.object(validator, "github_get", return_value=top) as get,
         ):
-            self.assertTrue(validator.validate_quadrants_pr(event))
-            get.assert_called_once_with("pulls/3")
+            self.assertTrue(validator.validate_quadrants_pr(event, UPSTREAM["full_name"]))
+            get.assert_called_once_with(UPSTREAM["full_name"], "pulls/3")
         self.assertEqual(calls, ["middle", "bottom"])
 
     def test_fork_at_top(self) -> None:
@@ -149,7 +151,7 @@ class StackValidationTests(unittest.TestCase):
         with patch.object(validator.urllib.request, "urlopen") as urlopen:
             urlopen.side_effect = [io.StringIO(json.dumps(top)), OSError("API rate limit exceeded")]
             with self.assertRaisesRegex(ValueError, "GitHub API lookup.*bottom.*failed: API rate limit exceeded"):
-                validator.validate_quadrants_pr(event)
+                validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
     def test_closed_and_merged_top(self) -> None:
         """Verify closed triggering PRs are intentionally skipped, whether merged or not."""
@@ -164,7 +166,7 @@ class StackValidationTests(unittest.TestCase):
                 event, _, _ = fixture(pr(1, "topic", "main"))
                 event["workflow_run"]["pull_requests"] = prs
                 with self.assertRaisesRegex(ValueError, "Expected exactly one triggering Quadrants PR"):
-                    validator.validate_quadrants_pr(event)
+                    validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
     def test_fork_targeting_main(self) -> None:
         """Reject fork sources even when their PR targets main."""
@@ -178,7 +180,7 @@ class StackValidationTests(unittest.TestCase):
         event, _, _ = fixture(pr(1, "topic", "main"))
         event["repository"] = FORK
         with self.assertRaisesRegex(ValueError, "Expected a workflow event from"):
-            validator.validate_quadrants_pr(event)
+            validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
     def test_invalid_pr_number(self) -> None:
         """Reject nonnumeric and invalid PR identifiers before constructing an API endpoint."""
@@ -187,7 +189,7 @@ class StackValidationTests(unittest.TestCase):
                 event, _, _ = fixture(pr(1, "topic", "main"))
                 event["workflow_run"]["pull_requests"] = [{"number": number}]
                 with self.assertRaisesRegex(ValueError, "Invalid triggering Quadrants PR number"):
-                    validator.validate_quadrants_pr(event)
+                    validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
     def test_api_pr_repository_mismatch(self) -> None:
         """Reject PR source or target repository mismatches in the direct API response."""
@@ -199,7 +201,7 @@ class StackValidationTests(unittest.TestCase):
                 wrong[side]["repo"] = FORK
                 with patch.object(validator, "github_get", return_value=wrong):
                     with self.assertRaisesRegex(ValueError, "repository must be Genesis-Embodied-AI/quadrants"):
-                        validator.validate_quadrants_pr(event)
+                        validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
     def test_stale_commit_and_wrong_event(self) -> None:
         """Reject outdated triggering commits and events that are not pull requests."""
@@ -213,7 +215,7 @@ class StackValidationTests(unittest.TestCase):
                 event["workflow_run"][field] = value
                 with self.assertRaisesRegex(ValueError, error):
                     with patch.object(validator, "github_get", return_value=top):
-                        validator.validate_quadrants_pr(event)
+                        validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
 
 class ApiAndCommandTests(unittest.TestCase):
@@ -223,7 +225,7 @@ class ApiAndCommandTests(unittest.TestCase):
         pages = [list(range(100)), [100]]
         with patch.object(validator.urllib.request, "urlopen") as urlopen:
             urlopen.side_effect = [io.StringIO(json.dumps(page)) for page in pages]
-            self.assertEqual(validator.list_pulls("hp/topic"), list(range(101)))
+            self.assertEqual(validator.list_pulls(UPSTREAM["full_name"], "hp/topic"), list(range(101)))
             for page_number, call in enumerate(urlopen.call_args_list, 1):
                 request = call.args[0]
                 query = urllib.parse.parse_qs(urllib.parse.urlsplit(request.full_url).query)
@@ -245,14 +247,14 @@ class ApiAndCommandTests(unittest.TestCase):
         error = urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None)
         with patch.object(validator.urllib.request, "urlopen", side_effect=error):
             with self.assertRaisesRegex(ValueError, "GitHub API lookup for 'pulls/1' failed: HTTP Error 403") as raised:
-                validator.github_get("pulls/1")
+                validator.github_get(UPSTREAM["full_name"], "pulls/1")
             self.assertIs(raised.exception.__cause__, error)
 
     @patch.dict(
         "os.environ",
         {
             "GITHUB_EVENT_PATH": "event.json",
-            "GITHUB_REPOSITORY": "Genesis-Embodied-AI/quadrants",
+            "QUADRANTS_REPOSITORY": "Genesis-Embodied-AI/quadrants",
             "GITHUB_OUTPUT": "output",
         },
     )
@@ -272,7 +274,7 @@ class ApiAndCommandTests(unittest.TestCase):
         "os.environ",
         {
             "GITHUB_EVENT_PATH": "event.json",
-            "GITHUB_REPOSITORY": "Genesis-Embodied-AI/quadrants",
+            "QUADRANTS_REPOSITORY": "Genesis-Embodied-AI/quadrants",
             "GITHUB_OUTPUT": "output",
         },
     )

@@ -90,6 +90,7 @@ jobs:
         if: github.repository == 'Genesis-Embodied-AI/quadrants'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QUADRANTS_REPOSITORY: ${{ github.repository }}
         run: |
           python3 .github/workflows/scripts/validate_quadrants_pr.py
           echo "WORKFLOW_VALIDATED=true" >> "$GITHUB_ENV"
