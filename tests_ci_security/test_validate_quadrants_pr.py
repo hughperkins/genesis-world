@@ -130,7 +130,25 @@ def test_cycles() -> None:
 
 
 def test_parent_commit_changed() -> None:
-    """Reject a parent whose head commit differs from the child PR base commit."""
+    """Reject a parent whose head commit differs from the child PR base commit.
+
+    Suppose PR B is stacked on PR A:
+
+        PR B: feature-b -> feature-a
+        PR A: feature-a -> main
+
+    We read two references to feature-a:
+
+    - B's base commit: the commit GitHub reports for B's target branch.
+    - A's head commit: the commit GitHub reports for A's source branch.
+
+    They should be the same commit, because both refer to feature-a.
+
+    If they differ, the branch may have changed between our API requests. The test verifies that validation stops
+    rather than proceeding with inconsistent information.
+
+    This does not compare B's head commit with A's head commit; those normally differ.
+    """
     parent = pr(1, "bottom", "main")
     parent["head"]["sha"] = "new-sha"
     with pytest.raises(ValueError, match="base branch 'bottom' changed"):
