@@ -30,10 +30,6 @@ def github_get(quadrants_repository: str, endpoint: str) -> Any:
 def list_pulls(quadrants_repository: str, branch: str) -> list[dict[str, Any]]:
     """Fetch all open PRs whose source is the named upstream Quadrants branch, across all API pages.
 
-    Q: Matching what?
-    A: Open PRs in Genesis-Embodied-AI/quadrants whose source owner/branch is Genesis-Embodied-AI:<branch>.
-       The caller also checks repository identity, since a different repository can have the same owner.
-
     Q: Why could more than one PR match?
     A: One branch can have PRs targeting different base branches, such as feature-b -> feature-a and feature-b -> main.
 
