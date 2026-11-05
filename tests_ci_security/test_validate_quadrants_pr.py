@@ -99,7 +99,11 @@ def test_fork_at_top() -> None:
 
 
 def test_same_owner_fork_parent() -> None:
-    """Reject a parent from a different repository even when its owner matches upstream."""
+    """Reject a parent from a different repository even when its owner matches upstream.
+
+    For example, Genesis-Embodied-AI/quadrants-fork must be rejected even though the organization matches. The parent's
+    source repository must be exactly Genesis-Embodied-AI/quadrants.
+    """
     parent = pr(1, "bottom", "main")
     parent["head"]["repo"] = {**FORK, "owner": UPSTREAM["owner"], "full_name": "Genesis-Embodied-AI/quadrants-fork"}
     with pytest.raises(ValueError, match="PR #1 originates from Genesis-Embodied-AI/quadrants-fork"):
