@@ -41,10 +41,6 @@ def list_pulls(quadrants_repository: str, branch: str) -> list[dict[str, Any]]:
     A: Yes: its base.ref names that branch. We look up that branch's own PR to discover the next base branch.
        Multiple open parent PRs make that next step ambiguous. The triggering PR is fetched directly by its event PR
        number, so this function is only used to find parents.
-
-    Q: What values can state take, and shouldn't it always be open?
-    A: GitHub accepts open, closed, or all; merged PRs count as closed. Parent lookups always use open. The triggering
-       PR is fetched by number, which also returns closed PRs, allowing an intentional skip if it closed during the build.
     """
     owner = quadrants_repository.split("/", 1)[0]
     pulls = []
