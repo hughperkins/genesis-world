@@ -11,7 +11,21 @@ from typing import Any
 
 
 def list_pulls(repository: str, head: str, state: str) -> list[dict[str, Any]]:
-    """Fetch all pages of PRs in the repository matching the requested source owner/branch and PR state."""
+    """Fetch all pages of PRs in the repository matching the requested source owner/branch and PR state.
+
+    ``head`` is ``owner:branch`` and identifies the source branch, not a unique PR. The same source branch can have
+    multiple PRs targeting different base branches, as well as previously closed PRs. This lookup does not filter by
+    base branch; the caller selects or rejects matches as appropriate.
+
+    A known PR's ``base.ref`` tells us which branch it is stacked on. To continue walking the stack, we need that
+    branch's own PR to discover its next base branch. Multiple open PRs from that branch make the next step ambiguous.
+    When a triggering PR number is available, a direct PR lookup can identify it without searching by source branch;
+    workflow-run events from forks can omit PR information, so a source-branch lookup is still needed as a fallback.
+
+    ``state`` accepts ``open``, ``closed``, or ``all``; merged PRs count as closed. The triggering lookup uses ``all``
+    because its PR may have closed or merged while the wheel was building. Finding that PR allows an intentional skip
+    instead of a misleading "PR not found" failure. Parent lookups use ``open`` because the stack must follow open PRs.
+    """
     pulls = []
     page = 1
     while True:
