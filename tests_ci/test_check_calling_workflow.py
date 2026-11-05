@@ -1,15 +1,20 @@
-"""Run with: python -m unittest discover -s .github/workflows/scripts -p 'test_check_calling_workflow.py' -v."""
+"""Run with: python -m unittest discover -s tests_ci -v."""
 
 import copy
 import io
+import importlib.util
 import json
 import unittest
 import urllib.error
 import urllib.parse
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import mock_open, patch
 
-import check_calling_workflow as validator
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / ".github/workflows/scripts/check_calling_workflow.py"
+spec = importlib.util.spec_from_file_location("check_calling_workflow", SCRIPT_PATH)
+validator = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(validator)
 
 UPSTREAM = {"id": 1, "full_name": "org/quadrants", "owner": {"login": "org"}, "default_branch": "main"}
 FORK = {"id": 2, "full_name": "alice/quadrants", "owner": {"login": "alice"}}
