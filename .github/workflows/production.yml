@@ -75,28 +75,29 @@ jobs:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
 
-      # Accept Genesis itself, or Quadrants after validating its PR. All other callers remain unvalidated.
+      - name: Initialize workflow validation
+        run: |
+          echo "WORKFLOW_VALIDATED=false" >> "$GITHUB_ENV"
+
+      - name: Accept the workflow repository
+        if: github.repository == job.workflow_repository
+        run: |
+          echo "WORKFLOW_VALIDATED=true" >> "$GITHUB_ENV"
+
       # Closed Quadrants PRs pass validation but retain is_open=false so cluster jobs are intentionally skipped.
-      - name: Check the calling workflow
+      - name: Validate the Quadrants caller
         id: check
+        if: github.repository == 'Genesis-Embodied-AI/quadrants'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CALLING_REPOSITORY: ${{ github.repository }}
-          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
         run: |
-          echo "WORKFLOW_VALIDATED=false" >> "$GITHUB_OUTPUT"
-          if [[ "$CALLING_REPOSITORY" == "$WORKFLOW_REPOSITORY" ]] ; then
-            echo "WORKFLOW_VALIDATED=true" >> "$GITHUB_OUTPUT"
-          elif [[ "$CALLING_REPOSITORY" == 'Genesis-Embodied-AI/quadrants' ]] ; then
-            python3 .github/workflows/scripts/check_calling_workflow.py
-            echo "WORKFLOW_VALIDATED=true" >> "$GITHUB_OUTPUT"
-          fi
+          python3 .github/workflows/scripts/check_calling_workflow.py
+          echo "WORKFLOW_VALIDATED=true" >> "$GITHUB_ENV"
 
       - name: Require a validated workflow
         # Run even after validation fails, so missing or false validation can never become an implicit approval.
         if: ${{ !cancelled() }}
         env:
-          WORKFLOW_VALIDATED: ${{ steps.check.outputs.WORKFLOW_VALIDATED || 'false' }}
           CALLING_REPOSITORY: ${{ github.repository }}
           WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
         run: |

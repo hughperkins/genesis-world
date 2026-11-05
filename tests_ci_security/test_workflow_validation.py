@@ -24,12 +24,15 @@ def step_commands(name: str) -> str:
 
 class WorkflowValidationTests(unittest.TestCase):
     def run_gate(self, caller: str, validator_status: int = 0, is_open: bool = True) -> tuple[int, str, str]:
-        """Run the approval step and mandatory guard, substituting only the Quadrants PR validator."""
+        """Run the four approval steps, substituting only the Quadrants PR validator and Actions step scheduling."""
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "outputs"
+            output.touch()
+            environment = Path(directory) / "environment"
             env = {
                 **os.environ,
                 "GITHUB_OUTPUT": str(output),
+                "GITHUB_ENV": str(environment),
                 "CALLING_REPOSITORY": caller,
                 "WORKFLOW_REPOSITORY": "Genesis-Embodied-AI/genesis-world",
                 "VALIDATOR_STATUS": str(validator_status),
@@ -42,23 +45,41 @@ class WorkflowValidationTests(unittest.TestCase):
               echo "is_open=$PR_IS_OPEN" >> "$GITHUB_OUTPUT"
             }
             """
-            check = subprocess.run(
-                [
-                    "bash",
-                    "--noprofile",
-                    "--norc",
-                    "-eo",
-                    "pipefail",
-                    "-c",
-                    stub + step_commands("Check the calling workflow"),
-                ],
-                env=env,
-                text=True,
-                capture_output=True,
+            # Assert the real conditions before simulating GitHub's scheduling of these conditional steps.
+            workflow = WORKFLOW.read_text()
+            self.assertIn(
+                "      - name: Accept the workflow repository\n"
+                "        if: github.repository == job.workflow_repository\n",
+                workflow,
             )
-            contents = output.read_text()
-            values = dict(line.split("=", 1) for line in contents.splitlines())
-            env["WORKFLOW_VALIDATED"] = values.get("WORKFLOW_VALIDATED", "false")
+            self.assertIn(
+                "      - name: Validate the Quadrants caller\n"
+                "        id: check\n"
+                "        if: github.repository == 'Genesis-Embodied-AI/quadrants'\n",
+                workflow,
+            )
+            steps = [
+                ("Initialize workflow validation", True),
+                ("Accept the workflow repository", caller == env["WORKFLOW_REPOSITORY"]),
+                ("Validate the Quadrants caller", caller == "Genesis-Embodied-AI/quadrants"),
+            ]
+            status = 0
+            log = ""
+            for name, enabled in steps:
+                if not enabled:
+                    continue
+                check = subprocess.run(
+                    ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", stub + step_commands(name)],
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                )
+                log += check.stdout
+                env.update(line.split("=", 1) for line in environment.read_text().splitlines())
+                status = check.returncode
+                if status:
+                    break
+            contents = environment.read_text() + output.read_text()
             guard = subprocess.run(
                 [
                     "bash",
@@ -73,7 +94,7 @@ class WorkflowValidationTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
             )
-            return check.returncode or guard.returncode, contents, check.stdout + guard.stdout
+            return status or guard.returncode, contents, log + guard.stdout
 
     def test_genesis_is_accepted_without_pr_validation(self) -> None:
         """Accept Genesis itself without invoking the Quadrants validator."""
