@@ -10,7 +10,12 @@ from typing import Any
 
 
 def github_get(quadrants_repository: str, endpoint: str) -> Any:
-    """Read a JSON endpoint in upstream Quadrants and identify that endpoint if the API request fails."""
+    """Ask GitHub for information about the supplied Quadrants repository and return the parsed JSON response.
+
+    For example, github_get(quadrants_repository, "pulls/1066") returns the details of PR #1066. The endpoint is relative
+    to that repository's GitHub API URL. Requests use GITHUB_TOKEN for authentication and a 30-second timeout. If a
+    request fails, the error identifies the endpoint that could not be fetched.
+    """
     try:
         url = f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com')}/repos/{quadrants_repository}/{endpoint}"
         request = urllib.request.Request(
