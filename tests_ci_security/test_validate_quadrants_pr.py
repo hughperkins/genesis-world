@@ -260,7 +260,12 @@ def test_stale_commit_and_wrong_event(field: str, value: str, error: str) -> Non
     },
 )
 def test_command_failure_does_not_emit_skip() -> None:
-    """Verify validation failure exits nonzero and emits an error without a skip output."""
+    """Check what happens when the validator rejects a workflow event:
+
+    - The script returns exit code 1, making the GitHub Actions step fail.
+    - It prints a GitHub Actions error explaining the rejection.
+    - It does not write is_open=false, which would mean "the PR is closed; intentionally skip its tests."
+    """
     with (
         patch.object(validator.Path, "read_text", return_value='{"workflow_run": {"event": "push"}}'),
         patch.object(validator.Path, "open", mock_open()) as output,
