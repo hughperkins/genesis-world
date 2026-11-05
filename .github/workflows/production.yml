@@ -75,15 +75,35 @@ jobs:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
 
-      # Default-branch PRs retain their existing eligibility. Stacked PRs must trace through open PRs whose source
-      # branches all belong to the calling repository. Invalid or unresolved stacks fail before cluster jobs start.
-      # Closed PRs are intentionally skipped; this is distinct from a stack validation failure.
+      # Accept Genesis itself, or Quadrants after validating its PR. All other callers remain unvalidated.
+      # Closed Quadrants PRs pass validation but retain is_open=false so cluster jobs are intentionally skipped.
       - name: Check the calling workflow
         id: check
-        if: github.repository != job.workflow_repository
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 .github/workflows/scripts/check_calling_workflow.py
+          CALLING_REPOSITORY: ${{ github.repository }}
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+        run: |
+          echo "WORKFLOW_VALIDATED=false" >> "$GITHUB_OUTPUT"
+          if [[ "$CALLING_REPOSITORY" == "$WORKFLOW_REPOSITORY" ]] ; then
+            echo "WORKFLOW_VALIDATED=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$CALLING_REPOSITORY" == 'Genesis-Embodied-AI/quadrants' ]] ; then
+            python3 .github/workflows/scripts/check_calling_workflow.py
+            echo "WORKFLOW_VALIDATED=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require a validated workflow
+        # Run even after validation fails, so missing or false validation can never become an implicit approval.
+        if: ${{ !cancelled() }}
+        env:
+          WORKFLOW_VALIDATED: ${{ steps.check.outputs.WORKFLOW_VALIDATED || 'false' }}
+          CALLING_REPOSITORY: ${{ github.repository }}
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+        run: |
+          if [[ "$WORKFLOW_VALIDATED" != 'true' ]] ; then
+            echo "::error::Workflow caller '$CALLING_REPOSITORY' was not validated. Only '$WORKFLOW_REPOSITORY' itself or Genesis-Embodied-AI/quadrants after successful PR validation may proceed. See the preceding validation step for details."
+            exit 1
+          fi
 
       # The pin lives in the tree rather than in this file so that a pull request bumping it is validated by its own
       # run instead of only taking effect once merged.
@@ -105,9 +125,9 @@ jobs:
       # One of the two runners of this repository stays reserved to it at all times, the other going to whichever run
       # asks first. The calls of every other repository therefore take a single runner all together: a call runs one job
       # at a time, and waits here until every older call has completed its unit tests and benchmarks. Run ids increase
-      # across repositories, so every call agrees on the order. A repository can call this workflow once it is added to
-      # the runner group below and to the repository access of the organization variable 'GENESIS_CI_APP_ID' and secret
-      # 'GENESIS_CI_APP_PRIVATE_KEY', and passes its secrets on through 'secrets: inherit'.
+      # across repositories, so every call agrees on the order. An external caller must be explicitly allowed by the
+      # validation step above, added to the runner group below and to the repository access of the organization variable
+      # 'GENESIS_CI_APP_ID' and secret 'GENESIS_CI_APP_PRIVATE_KEY', and pass its secrets through 'secrets: inherit'.
       - name: Create a token of the GitHub App
         id: token
         if: github.repository != job.workflow_repository && steps.check.outputs.is_open != 'false'
