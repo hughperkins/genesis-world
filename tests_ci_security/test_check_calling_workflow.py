@@ -230,7 +230,7 @@ class ApiAndCommandTests(unittest.TestCase):
     def test_annotation_escaping(self) -> None:
         """Verify annotation messages cannot inject additional workflow commands."""
         with redirect_stdout(io.StringIO()) as stdout:
-            validator.annotation("error", "Failed 100%\r\n::notice::not a separate command")
+            validator.emit_github_annotation("error", "Failed 100%\r\n::notice::not a separate command")
         self.assertEqual(stdout.getvalue(), "::error::Failed 100%25%0D%0A::notice::not a separate command\n")
 
 
