@@ -156,7 +156,7 @@ def test_parent_commit_changed() -> None:
 
 
 def test_parent_targets_other_repository() -> None:
-    """Reject a parent PR whose target repository is not upstream."""
+    """Reject a parent PR whose target repository is not Genesis-Embodied-AI/quadrants."""
     parent = pr(1, "bottom", "main")
     parent["base"]["repo"] = FORK
     with pytest.raises(ValueError, match="PR #1 targets a repository other than Genesis-Embodied-AI/quadrants"):
