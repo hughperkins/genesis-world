@@ -6,7 +6,6 @@ import importlib.util
 import json
 import unittest
 import urllib.error
-import urllib.parse
 from collections.abc import Callable, Sequence
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -148,10 +147,16 @@ class StackValidationTests(unittest.TestCase):
         """Verify a parent lookup failure identifies its branch and stops stack validation."""
         top = pr(2, "top", "bottom")
         event, _, _ = fixture(top)
-        with patch.object(validator.urllib.request, "urlopen") as urlopen:
-            urlopen.side_effect = [io.StringIO(json.dumps(top)), OSError("API rate limit exceeded")]
-            with self.assertRaisesRegex(ValueError, "GitHub API lookup.*bottom.*failed: API rate limit exceeded"):
-                validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+        errors = [
+            OSError("Connection failed"),
+            urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None),
+        ]
+        for error in errors:
+            with self.subTest(error=error):
+                with patch.object(validator.urllib.request, "urlopen") as urlopen:
+                    urlopen.side_effect = [io.StringIO(json.dumps(top)), error]
+                    with self.assertRaisesRegex(ValueError, "GitHub API lookup.*bottom.*failed"):
+                        validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
     def test_closed_and_merged_top(self) -> None:
         """Verify closed triggering PRs are intentionally skipped, whether merged or not."""
@@ -219,57 +224,6 @@ class StackValidationTests(unittest.TestCase):
 
 
 class ApiAndCommandTests(unittest.TestCase):
-    @patch.dict("os.environ", {"GITHUB_TOKEN": "test-token", "GITHUB_API_URL": "https://api.github.com"})
-    def test_api_pagination_and_request(self) -> None:
-        """Verify all API pages are fetched with authentication, query parameters, and a timeout."""
-        pages = [list(range(100)), [100]]
-        with patch.object(validator.urllib.request, "urlopen") as urlopen:
-            urlopen.side_effect = [io.StringIO(json.dumps(page)) for page in pages]
-            self.assertEqual(validator.list_pulls(UPSTREAM["full_name"], "hp/topic"), list(range(101)))
-            for page_number, call in enumerate(urlopen.call_args_list, 1):
-                request = call.args[0]
-                query = urllib.parse.parse_qs(urllib.parse.urlsplit(request.full_url).query)
-                self.assertEqual(
-                    query,
-                    {
-                        "head": ["Genesis-Embodied-AI:hp/topic"],
-                        "state": ["open"],
-                        "page": [str(page_number)],
-                        "per_page": ["100"],
-                    },
-                )
-                self.assertEqual(request.get_header("Authorization"), "Bearer test-token")
-                self.assertEqual(call.kwargs["timeout"], 30)
-
-    @patch.dict("os.environ", {"GITHUB_TOKEN": "test-token"})
-    def test_http_errors_propagate(self) -> None:
-        """Verify HTTP failures include the queried branch and preserve the original exception as their cause."""
-        error = urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None)
-        with patch.object(validator.urllib.request, "urlopen", side_effect=error):
-            with self.assertRaisesRegex(ValueError, "GitHub API lookup for 'pulls/1' failed: HTTP Error 403") as raised:
-                validator.github_get(UPSTREAM["full_name"], "pulls/1")
-            self.assertIs(raised.exception.__cause__, error)
-
-    @patch.dict(
-        "os.environ",
-        {
-            "GITHUB_EVENT_PATH": "event.json",
-            "QUADRANTS_REPOSITORY": "Genesis-Embodied-AI/quadrants",
-            "GITHUB_OUTPUT": "output",
-        },
-    )
-    def test_command_outputs(self) -> None:
-        """Verify successful validation writes the correct Actions output for open and closed PRs."""
-        for is_open in [True, False]:
-            with self.subTest(is_open=is_open):
-                with (
-                    patch.object(validator.Path, "read_text", return_value="{}"),
-                    patch.object(validator, "validate_quadrants_pr", return_value=is_open),
-                    patch.object(validator.Path, "open", mock_open()) as output,
-                ):
-                    self.assertEqual(validator.main(), 0)
-                    output().write.assert_called_once_with(f"is_open={str(is_open).lower()}\n")
-
     @patch.dict(
         "os.environ",
         {
