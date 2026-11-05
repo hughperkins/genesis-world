@@ -81,11 +81,9 @@ jobs:
       - name: Check the calling workflow
         id: check
         if: github.repository != job.workflow_repository
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const check = require('./.github/workflows/scripts/check_calling_workflow.cjs');
-            await check({ github, context, core });
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/workflows/scripts/check_calling_workflow.py
 
       # The pin lives in the tree rather than in this file so that a pull request bumping it is validated by its own
       # run instead of only taking effect once merged.
