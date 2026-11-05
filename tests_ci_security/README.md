@@ -7,5 +7,3 @@ Keep these tests independent of Genesis, GPU libraries, credentials, and externa
 ```bash
 python -m unittest discover -s tests_ci_security -v
 ```
-
-The `CI Security Tests` workflow runs this suite on pull requests and pushes to `main`.
