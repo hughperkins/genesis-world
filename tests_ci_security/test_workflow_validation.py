@@ -91,14 +91,14 @@ def test_genesis_is_accepted_without_pr_validation() -> None:
     assert "validator called" not in log
 
 
-def test_quadrants_requires_successful_validation() -> None:
+@pytest.mark.parametrize("is_open", [True, False], ids=["open", "closed"])
+def test_quadrants_requires_successful_validation(is_open: bool) -> None:
     """Accept Quadrants only after its PR validator succeeds, including intentional closed-PR skips."""
-    for is_open in [True, False]:
-        status, outputs, log = run_gate("Genesis-Embodied-AI/quadrants", is_open=is_open)
-        assert status == 0
-        assert "WORKFLOW_VALIDATED=true" in outputs
-        assert f"is_open={str(is_open).lower()}" in outputs
-        assert "validator called" in log
+    status, outputs, log = run_gate("Genesis-Embodied-AI/quadrants", is_open=is_open)
+    assert status == 0
+    assert "WORKFLOW_VALIDATED=true" in outputs
+    assert f"is_open={str(is_open).lower()}" in outputs
+    assert "validator called" in log
 
 
 def test_failed_quadrants_validation_stays_rejected() -> None:
@@ -110,28 +110,34 @@ def test_failed_quadrants_validation_stays_rejected() -> None:
     assert "::error::Workflow caller" not in log
 
 
-def test_unknown_callers_are_rejected() -> None:
+@pytest.mark.parametrize(
+    "caller",
+    ["alice/quadrants", "Genesis-Embodied-AI/other", "alice/genesis-world"],
+    ids=["quadrants-fork", "other-repository", "genesis-fork"],
+)
+def test_unknown_callers_are_rejected(caller: str) -> None:
     """Reject forks and unrelated repositories without running the PR validator."""
-    for caller in ["alice/quadrants", "Genesis-Embodied-AI/other", "alice/genesis-world"]:
-        status, outputs, log = run_gate(caller)
-        assert status != 0
-        assert "WORKFLOW_VALIDATED=true" not in outputs
-        assert "validator called" not in log
-        assert f"::error::Workflow caller '{caller}' was not validated" in log
+    status, outputs, log = run_gate(caller)
+    assert status != 0
+    assert "WORKFLOW_VALIDATED=true" not in outputs
+    assert "validator called" not in log
+    assert f"::error::Workflow caller '{caller}' was not validated" in log
 
 
-def test_guard_rejects_missing_or_invalid_flag() -> None:
+@pytest.mark.parametrize(
+    "value", [None, "false", "", "TRUE", "1"], ids=["missing", "false", "empty", "uppercase-true", "numeric-true"]
+)
+def test_guard_rejects_missing_or_invalid_flag(value: str | None) -> None:
     """Require exactly true; missing, false, or unexpected values must never authorize cluster execution."""
-    for value in [None, "false", "", "TRUE", "1"]:
-        env = {**os.environ, "CALLING_REPOSITORY": "unknown", "WORKFLOW_REPOSITORY": "genesis"}
-        env.pop("WORKFLOW_VALIDATED", None)
-        if value is not None:
-            env["WORKFLOW_VALIDATED"] = value
-        guard = subprocess.run(
-            ["bash", "-eo", "pipefail", "-c", step_commands("Require a validated workflow")],
-            env=env,
-            text=True,
-            capture_output=True,
-        )
-        assert guard.returncode != 0
-        assert "::error::" in guard.stdout
+    env = {**os.environ, "CALLING_REPOSITORY": "unknown", "WORKFLOW_REPOSITORY": "genesis"}
+    env.pop("WORKFLOW_VALIDATED", None)
+    if value is not None:
+        env["WORKFLOW_VALIDATED"] = value
+    guard = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step_commands("Require a validated workflow")],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    assert guard.returncode != 0
+    assert "::error::" in guard.stdout

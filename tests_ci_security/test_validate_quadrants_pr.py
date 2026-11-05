@@ -110,11 +110,13 @@ def test_same_owner_fork_parent() -> None:
         check(pr(2, "top", "bottom"), [parent])
 
 
-def test_unresolved_or_closed_parents() -> None:
+@pytest.mark.parametrize(
+    "others", [[], [pr(1, "bottom", "main", state="closed")]], ids=["missing-parent", "closed-parent"]
+)
+def test_unresolved_or_closed_parents(others: list[dict[str, Any]]) -> None:
     """Reject stacks with no open parent PR for the base branch."""
-    for others in [[], [pr(1, "bottom", "main", state="closed")]]:
-        with pytest.raises(ValueError, match="no open parent PR found.*bottom"):
-            check(pr(2, "top", "bottom"), others)
+    with pytest.raises(ValueError, match="no open parent PR found.*bottom"):
+        check(pr(2, "top", "bottom"), others)
 
 
 def test_ambiguous_parents() -> None:
@@ -163,20 +165,20 @@ def test_parent_targets_other_repository() -> None:
         check(pr(2, "top", "bottom"), [parent])
 
 
+@pytest.mark.parametrize(
+    "error",
+    [OSError("Connection failed"), urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None)],
+    ids=["connection-error", "http-forbidden"],
+)
 @patch.dict("os.environ", {"GITHUB_TOKEN": "test-token"})
-def test_api_failure_context() -> None:
+def test_api_failure_context(error: Exception) -> None:
     """Verify a parent lookup failure identifies its branch and stops stack validation."""
     top = pr(2, "top", "bottom")
     event, _, _ = fixture(top)
-    errors = [
-        OSError("Connection failed"),
-        urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None),
-    ]
-    for error in errors:
-        with patch.object(validator.urllib.request, "urlopen") as urlopen:
-            urlopen.side_effect = [io.StringIO(json.dumps(top)), error]
-            with pytest.raises(ValueError, match="GitHub API lookup.*bottom.*failed"):
-                validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+    with patch.object(validator.urllib.request, "urlopen") as urlopen:
+        urlopen.side_effect = [io.StringIO(json.dumps(top)), error]
+        with pytest.raises(ValueError, match="GitHub API lookup.*bottom.*failed"):
+            validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
 
 @pytest.mark.parametrize("merged_at", [None, "2026-11-05T00:00:00Z"], ids=["closed", "merged"])
@@ -185,13 +187,13 @@ def test_closed_and_merged_top(merged_at: str | None) -> None:
     assert not check(pr(1, "topic", "main", state="closed", merged_at=merged_at))
 
 
-def test_missing_or_ambiguous_triggering_pr() -> None:
+@pytest.mark.parametrize("prs", [[], [{"number": 1}, {"number": 2}]], ids=["missing-pr", "multiple-prs"])
+def test_missing_or_ambiguous_triggering_pr(prs: list[dict[str, int]]) -> None:
     """Reject events without exactly one PR number instead of searching by source branch."""
-    for prs in [[], [{"number": 1}, {"number": 2}]]:
-        event, _, _ = fixture(pr(1, "topic", "main"))
-        event["workflow_run"]["pull_requests"] = prs
-        with pytest.raises(ValueError, match="Expected exactly one triggering Quadrants PR"):
-            validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+    event, _, _ = fixture(pr(1, "topic", "main"))
+    event["workflow_run"]["pull_requests"] = prs
+    with pytest.raises(ValueError, match="Expected exactly one triggering Quadrants PR"):
+        validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
 
 def test_fork_targeting_main() -> None:
@@ -210,25 +212,25 @@ def test_wrong_event_repository() -> None:
         validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
 
-def test_invalid_pr_number() -> None:
+@pytest.mark.parametrize("number", ["../other", 0, -1, True], ids=["path-string", "zero", "negative", "boolean"])
+def test_invalid_pr_number(number: str | int) -> None:
     """Reject nonnumeric and invalid PR identifiers before constructing an API endpoint."""
-    for number in ["../other", 0, -1, True]:
-        event, _, _ = fixture(pr(1, "topic", "main"))
-        event["workflow_run"]["pull_requests"] = [{"number": number}]
-        with pytest.raises(ValueError, match="Invalid triggering Quadrants PR number"):
-            validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+    event, _, _ = fixture(pr(1, "topic", "main"))
+    event["workflow_run"]["pull_requests"] = [{"number": number}]
+    with pytest.raises(ValueError, match="Invalid triggering Quadrants PR number"):
+        validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
 
-def test_api_pr_repository_mismatch() -> None:
+@pytest.mark.parametrize("side", ["head", "base"], ids=["source-repository", "target-repository"])
+def test_api_pr_repository_mismatch(side: str) -> None:
     """Reject PR source or target repository mismatches in the direct API response."""
-    for side in ["head", "base"]:
-        top = pr(1, "topic", "main")
-        event, _, _ = fixture(top)
-        wrong = copy.deepcopy(top)
-        wrong[side]["repo"] = FORK
-        with patch.object(validator, "github_get", return_value=wrong):
-            with pytest.raises(ValueError, match="repository must be Genesis-Embodied-AI/quadrants"):
-                validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+    top = pr(1, "topic", "main")
+    event, _, _ = fixture(top)
+    wrong = copy.deepcopy(top)
+    wrong[side]["repo"] = FORK
+    with patch.object(validator, "github_get", return_value=wrong):
+        with pytest.raises(ValueError, match="repository must be Genesis-Embodied-AI/quadrants"):
+            validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
 
 @pytest.mark.parametrize(
