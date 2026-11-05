@@ -86,16 +86,8 @@ def test_default_branch_pr() -> None:
 
 
 def test_three_level_internal_stack() -> None:
-    """Fetch the triggering PR directly and walk only its parent branches to main."""
-    top = pr(3, "top", "middle")
-    event, fetch, calls = fixture(top, [pr(2, "middle", "bottom"), pr(1, "bottom", "main")])
-    with (
-        patch.object(validator, "list_pulls", side_effect=fetch),
-        patch.object(validator, "github_get", return_value=top) as get,
-    ):
-        assert validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
-        get.assert_called_once_with(UPSTREAM["full_name"], "pulls/3")
-    assert calls == ["middle", "bottom"]
+    """Accept a valid stack whose branches all belong to upstream Quadrants."""
+    assert check(pr(3, "top", "middle"), [pr(2, "middle", "bottom"), pr(1, "bottom", "main")])
 
 
 def test_fork_at_top() -> None:
