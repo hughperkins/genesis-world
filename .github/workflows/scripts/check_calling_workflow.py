@@ -54,7 +54,16 @@ def list_pulls(repository: str, head: str, state: str) -> list[dict[str, Any]]:
 
 
 def annotation(level: str, message: object) -> None:
-    """Emit a GitHub Actions annotation, escaping workflow command characters."""
+    """Print a message in GitHub Actions' workflow-command format so it appears in the workflow UI.
+
+    ``level`` selects the annotation type, such as ``error`` or ``notice``. For example, an error is printed as
+    ``::error::Stack validation failed: ...``, while an intentional skip can use ``::notice::Pull request #123 is closed``.
+    Percent signs, carriage returns, and newlines in the message are escaped so message text cannot inject additional
+    workflow commands.
+
+    An error annotation does not itself fail the job. The script must also exit with a nonzero status, as ``main()``
+    does when validation fails.
+    """
     message = str(message).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print(f"::{level}::{message}")
 
