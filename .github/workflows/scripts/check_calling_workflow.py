@@ -11,7 +11,7 @@ from typing import Any
 
 
 def list_pulls(repository: str, head: str, state: str) -> list[dict[str, Any]]:
-    """Fetch every matching PR, including matches beyond the first page."""
+    """Fetch all pages of PRs in the repository matching the requested source owner/branch and PR state."""
     pulls = []
     page = 1
     while True:
