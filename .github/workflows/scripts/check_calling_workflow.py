@@ -71,7 +71,16 @@ def check_calling_workflow(
     event: dict[str, Any],
     repository_name: str,
 ) -> bool:
-    """Return whether the PR is open; reject invalid or unresolved stacks with an error.
+    """Return whether the PR is open; reject stacks that violate restrictions or cannot be traced to the default branch.
+
+    A stack is rejected if:
+    - A PR's source or target repository is not the calling upstream repository.
+    - A base branch has no open parent PR, or has multiple possible open parent PRs.
+    - The parent chain loops back to a PR already visited.
+    - A parent's head commit differs from its child's recorded base commit.
+
+    These stack checks apply to open PRs targeting a non-default branch. PRs targeting the default branch retain their
+    existing eligibility, including forks; closed triggering PRs are intentionally skipped.
 
     ``event`` is the JSON payload read from GITHUB_EVENT_PATH. For example, a simplified payload for a completed
     Quadrants wheel build looks like this (the actual event contains additional fields):
