@@ -5,10 +5,12 @@ import os
 import sys
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 
-def list_pulls(repository, head, state):
+def list_pulls(repository: str, head: str, state: str) -> list[dict[str, Any]]:
     """Fetch every matching PR, including matches beyond the first page."""
     pulls = []
     page = 1
@@ -31,12 +33,17 @@ def list_pulls(repository, head, state):
         page += 1
 
 
-def annotation(level, message):
+def annotation(level: str, message: object) -> None:
+    """Emit a GitHub Actions annotation, escaping workflow command characters."""
     message = str(message).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print(f"::{level}::{message}")
 
 
-def check_calling_workflow(event, repository_name, fetch_pulls=list_pulls):
+def check_calling_workflow(
+    event: dict[str, Any],
+    repository_name: str,
+    fetch_pulls: Callable[[str, str, str], list[dict[str, Any]]] = list_pulls,
+) -> bool:
     """Return whether the PR is open; reject invalid or unresolved stacks with an error."""
     run = event.get("workflow_run") or {}
     if run.get("event") != "pull_request":
@@ -46,7 +53,8 @@ def check_calling_workflow(event, repository_name, fetch_pulls=list_pulls):
     default_branch = repository["default_branch"]
     owner = repository_name.split("/")[0]
 
-    def lookup(head, state):
+    def lookup(head: str, state: str) -> list[dict[str, Any]]:
+        """Look up PRs and add branch context to API failures."""
         try:
             return fetch_pulls(repository_name, head, state)
         except Exception as error:
@@ -114,7 +122,8 @@ def check_calling_workflow(event, repository_name, fetch_pulls=list_pulls):
     return True
 
 
-def main():
+def main() -> int:
+    """Read the Actions event, emit eligibility on success, and report failures with a nonzero exit code."""
     try:
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
         is_open = check_calling_workflow(event, os.environ["GITHUB_REPOSITORY"])
