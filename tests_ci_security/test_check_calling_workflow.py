@@ -1,4 +1,4 @@
-"""Run with: python -m unittest discover -s tests_ci -v."""
+"""Run with: python -m unittest discover -s tests_ci_security -v."""
 
 import copy
 import io

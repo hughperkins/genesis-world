@@ -1,4 +1,4 @@
-name: CI Unit Tests
+name: CI Security Tests
 
 on:
   pull_request:
@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  tests-ci:
-    name: CI unit tests
+  tests-ci-security:
+    name: CI security tests
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -27,5 +27,5 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Run CI unit tests
-        run: python -m unittest discover -s tests_ci -v
+      - name: Run CI security tests
+        run: python -m unittest discover -s tests_ci_security -v

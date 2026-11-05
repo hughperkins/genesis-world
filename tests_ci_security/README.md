@@ -7,7 +7,7 @@ The stack validator belongs here because it determines which pull requests may s
 Keep these tests independent of Genesis, GPU libraries, credentials, and external services. They run with Python 3.12 and the standard library only:
 
 ```bash
-python -m unittest discover -s tests_ci -v
+python -m unittest discover -s tests_ci_security -v
 ```
 
-The `CI Unit Tests` workflow runs this suite on pull requests and pushes to `main`.
+The `CI Security Tests` workflow runs this suite on pull requests and pushes to `main`.
