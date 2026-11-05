@@ -13,18 +13,24 @@ from typing import Any
 def list_pulls(repository: str, head: str, state: str) -> list[dict[str, Any]]:
     """Fetch all pages of PRs in the repository matching the requested source owner/branch and PR state.
 
-    ``head`` is ``owner:branch`` and identifies the source branch, not a unique PR. The same source branch can have
-    multiple PRs targeting different base branches, as well as previously closed PRs. This lookup does not filter by
-    base branch; the caller selects or rejects matches as appropriate.
+    Q: Matching what?
+    A: PRs in ``repository`` whose source owner/branch matches ``head`` (``owner:branch``) and whose state matches
+       ``state``. This lookup does not filter by base branch; the caller selects or rejects matches as appropriate.
 
-    A known PR's ``base.ref`` tells us which branch it is stacked on. To continue walking the stack, we need that
-    branch's own PR to discover its next base branch. Multiple open PRs from that branch make the next step ambiguous.
-    When a triggering PR number is available, a direct PR lookup can identify it without searching by source branch;
-    workflow-run events from forks can omit PR information, so a source-branch lookup is still needed as a fallback.
+    Q: Why could more than one PR match?
+    A: One source branch can have PRs targeting different base branches, such as ``feature-b -> feature-a`` and
+       ``feature-b -> main``. Previously closed PRs can also match when requesting ``state="all"``.
 
-    ``state`` accepts ``open``, ``closed``, or ``all``; merged PRs count as closed. The triggering lookup uses ``all``
-    because its PR may have closed or merged while the wheel was building. Finding that PR allows an intentional skip
-    instead of a misleading "PR not found" failure. Parent lookups use ``open`` because the stack must follow open PRs.
+    Q: Don't we already know which branch the PR is stacked on?
+    A: Yes: its ``base.ref`` names that branch. To continue walking the stack, we need that branch's own PR to discover
+       its next base branch. Multiple open PRs from that branch make the next step ambiguous. A known triggering PR
+       number allows a direct lookup, but workflow-run events from forks can omit PR information, so a source-branch
+       lookup is still needed as a fallback.
+
+    Q: What values can ``state`` take, and shouldn't it always be ``open``?
+    A: It accepts ``open``, ``closed``, or ``all``; merged PRs count as closed. Parent lookups use ``open`` because the
+       stack must follow open PRs. The triggering lookup uses ``all`` because its PR may have closed or merged while
+       the wheel was building. Finding that PR allows an intentional skip instead of a misleading "PR not found" error.
     """
     pulls = []
     page = 1
