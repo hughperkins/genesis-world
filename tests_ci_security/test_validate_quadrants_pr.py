@@ -179,10 +179,10 @@ def test_api_failure_context() -> None:
                 validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
 
-def test_closed_and_merged_top() -> None:
+@pytest.mark.parametrize("merged_at", [None, "2026-11-05T00:00:00Z"], ids=["closed", "merged"])
+def test_closed_and_merged_top(merged_at: str | None) -> None:
     """Return False for a merged or closed Quadrants PR, telling the workflow to skip its tests."""
-    for merged_at in [None, "2026-11-05T00:00:00Z"]:
-        assert not check(pr(1, "topic", "main", state="closed", merged_at=merged_at))
+    assert not check(pr(1, "topic", "main", state="closed", merged_at=merged_at))
 
 
 def test_missing_or_ambiguous_triggering_pr() -> None:
