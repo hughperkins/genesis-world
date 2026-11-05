@@ -231,18 +231,22 @@ def test_api_pr_repository_mismatch() -> None:
                 validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
 
-def test_stale_commit_and_wrong_event() -> None:
-    """Reject outdated triggering commits and events that are not pull requests."""
-    for field, value, error in [
+@pytest.mark.parametrize(
+    "field,value,error",
+    [
         ("head_sha", "old-sha", "no longer matches the triggering branch and commit old-sha"),
         ("event", "push", "Started by 'push'"),
-    ]:
-        top = pr(1, "topic", "main")
-        event, _, _ = fixture(top)
-        event["workflow_run"][field] = value
-        with pytest.raises(ValueError, match=error):
-            with patch.object(validator, "github_get", return_value=top):
-                validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
+    ],
+    ids=["stale-commit", "wrong-event"],
+)
+def test_stale_commit_and_wrong_event(field: str, value: str, error: str) -> None:
+    """Reject outdated triggering commits and events that are not pull requests."""
+    top = pr(1, "topic", "main")
+    event, _, _ = fixture(top)
+    event["workflow_run"][field] = value
+    with pytest.raises(ValueError, match=error):
+        with patch.object(validator, "github_get", return_value=top):
+            validator.validate_quadrants_pr(event, UPSTREAM["full_name"])
 
 
 @patch.dict(
