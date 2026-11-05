@@ -132,18 +132,16 @@ class StackValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "PR #1 targets a repository other than org/quadrants"):
             self.check(pr(2, "top", "bottom"), [parent])
 
+    @patch.dict("os.environ", {"GITHUB_TOKEN": "test-token"})
     def test_api_failure_context(self) -> None:
-        """Verify lookup failures identify the branch that could not be checked."""
-        event, fetch, _ = fixture(pr(2, "top", "bottom"))
-
-        def failing_fetch(repository: str, head: str, state: str) -> list[dict[str, Any]]:
-            """Simulate an API failure when the validator looks up the parent branch."""
-            if head == "org:bottom":
-                raise OSError("API rate limit exceeded")
-            return fetch(repository, head, state)
-
-        with self.assertRaisesRegex(ValueError, "GitHub API lookup for 'org:bottom' failed: API rate limit exceeded"):
-            with patch.object(validator, "list_pulls", side_effect=failing_fetch):
+        """Verify a parent lookup failure identifies its branch and stops stack validation."""
+        top = pr(2, "top", "bottom")
+        event, _, _ = fixture(top)
+        with patch.object(validator.urllib.request, "urlopen") as urlopen:
+            urlopen.side_effect = [io.StringIO(json.dumps([top])), OSError("API rate limit exceeded")]
+            with self.assertRaisesRegex(
+                ValueError, "GitHub API lookup for 'org:bottom' failed: API rate limit exceeded"
+            ):
                 validator.check_calling_workflow(event, "org/quadrants")
 
     def test_closed_and_merged_top(self) -> None:
@@ -194,11 +192,14 @@ class ApiAndCommandTests(unittest.TestCase):
 
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test-token"})
     def test_http_errors_propagate(self) -> None:
-        """Verify HTTP failures propagate instead of appearing as empty PR results."""
+        """Verify HTTP failures include the queried branch and preserve the original exception as their cause."""
         error = urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None)
         with patch.object(validator.urllib.request, "urlopen", side_effect=error):
-            with self.assertRaises(urllib.error.HTTPError):
+            with self.assertRaisesRegex(
+                ValueError, "GitHub API lookup for 'org:topic' failed: HTTP Error 403"
+            ) as raised:
                 validator.list_pulls("org/quadrants", "org:topic", "all")
+            self.assertIs(raised.exception.__cause__, error)
 
     @patch.dict(
         "os.environ",

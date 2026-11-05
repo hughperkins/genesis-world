@@ -12,6 +12,8 @@ from typing import Any
 def list_pulls(repository: str, head: str, state: str) -> list[dict[str, Any]]:
     """Fetch all pages of PRs in the repository matching the requested source owner/branch and PR state.
 
+    API failures are raised with the source owner/branch in the error message.
+
     Q: Matching what?
     A: PRs in ``repository`` whose source owner/branch matches ``head`` (``owner:branch``) and whose state matches
        ``state``. This lookup does not filter by base branch; the caller selects or rejects matches as appropriate.
@@ -31,25 +33,28 @@ def list_pulls(repository: str, head: str, state: str) -> list[dict[str, Any]]:
        stack must follow open PRs. The triggering lookup uses ``all`` because its PR may have closed or merged while
        the wheel was building. Finding that PR allows an intentional skip instead of a misleading "PR not found" error.
     """
-    pulls = []
-    page = 1
-    while True:
-        query = urllib.parse.urlencode({"head": head, "state": state, "per_page": 100, "page": page})
-        url = f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com')}/repos/{repository}/pulls?{query}"
-        request = urllib.request.Request(
-            url,
-            headers={
-                "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
-                "Accept": "application/vnd.github+json",
-                "User-Agent": "genesis-stack-validator",
-            },
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            batch = json.load(response)
-        pulls.extend(batch)
-        if len(batch) < 100:
-            return pulls
-        page += 1
+    try:
+        pulls = []
+        page = 1
+        while True:
+            query = urllib.parse.urlencode({"head": head, "state": state, "per_page": 100, "page": page})
+            url = f"{os.environ.get('GITHUB_API_URL', 'https://api.github.com')}/repos/{repository}/pulls?{query}"
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "genesis-stack-validator",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=30) as response:
+                batch = json.load(response)
+            pulls.extend(batch)
+            if len(batch) < 100:
+                return pulls
+            page += 1
+    except Exception as error:
+        raise ValueError(f"Stack validation failed: GitHub API lookup for '{head}' failed: {error}") from error
 
 
 def print_github_annotation(level: str, message: object) -> None:
@@ -113,14 +118,9 @@ def check_calling_workflow(
     default_branch = repository["default_branch"]
     owner = repository_name.split("/")[0]
 
-    def lookup(head: str, state: str) -> list[dict[str, Any]]:
-        """Look up PRs and add branch context to API failures."""
-        try:
-            return list_pulls(repository_name, head, state)
-        except Exception as error:
-            raise ValueError(f"Stack validation failed: GitHub API lookup for '{head}' failed: {error}") from error
-
-    pulls = lookup(f"{workflow_run['head_repository']['owner']['login']}:{workflow_run['head_branch']}", "all")
+    pulls = list_pulls(
+        repository_name, f"{workflow_run['head_repository']['owner']['login']}:{workflow_run['head_branch']}", "all"
+    )
     matching = [
         pull
         for pull in pulls
@@ -166,7 +166,7 @@ def check_calling_workflow(
                 break
             parents = [
                 parent
-                for parent in lookup(f"{owner}:{base['ref']}", "open")
+                for parent in list_pulls(repository_name, f"{owner}:{base['ref']}", "open")
                 if parent["head"]["ref"] == base["ref"] and parent["state"] == "open"
             ]
             if len(parents) != 1:
