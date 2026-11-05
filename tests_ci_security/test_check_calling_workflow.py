@@ -69,7 +69,8 @@ class StackValidationTests(unittest.TestCase):
     def check(self, top: dict[str, Any], others: Sequence[dict[str, Any]] = ()) -> bool:
         """Run the validator against a triggering PR and its available parent PRs."""
         event, fetch, _ = fixture(top, others)
-        return validator.check_calling_workflow(event, "org/quadrants", fetch)
+        with patch.object(validator, "list_pulls", side_effect=fetch):
+            return validator.check_calling_workflow(event, "org/quadrants")
 
     def test_default_branch_prs(self) -> None:
         """Verify upstream and fork PRs targeting the default branch remain eligible."""
@@ -82,7 +83,8 @@ class StackValidationTests(unittest.TestCase):
     def test_three_level_internal_stack(self) -> None:
         """Verify the validator follows every parent in an upstream stack to the default branch."""
         event, fetch, calls = fixture(pr(3, "top", "middle"), [pr(2, "middle", "bottom"), pr(1, "bottom", "main")])
-        self.assertTrue(validator.check_calling_workflow(event, "org/quadrants", fetch))
+        with patch.object(validator, "list_pulls", side_effect=fetch):
+            self.assertTrue(validator.check_calling_workflow(event, "org/quadrants"))
         self.assertEqual(calls, ["org:top", "org:middle", "org:bottom"])
 
     def test_fork_at_top(self) -> None:
@@ -141,7 +143,8 @@ class StackValidationTests(unittest.TestCase):
             return fetch(repository, head, state)
 
         with self.assertRaisesRegex(ValueError, "GitHub API lookup for 'org:bottom' failed: API rate limit exceeded"):
-            validator.check_calling_workflow(event, "org/quadrants", failing_fetch)
+            with patch.object(validator, "list_pulls", side_effect=failing_fetch):
+                validator.check_calling_workflow(event, "org/quadrants")
 
     def test_closed_and_merged_top(self) -> None:
         """Verify closed triggering PRs are intentionally skipped, whether merged or not."""
@@ -168,7 +171,8 @@ class StackValidationTests(unittest.TestCase):
                 event, fetch, _ = fixture(pr(1, "topic", "main"))
                 event["workflow_run"][field] = value
                 with self.assertRaisesRegex(ValueError, error):
-                    validator.check_calling_workflow(event, "org/quadrants", fetch)
+                    with patch.object(validator, "list_pulls", side_effect=fetch):
+                        validator.check_calling_workflow(event, "org/quadrants")
 
 
 class ApiAndCommandTests(unittest.TestCase):

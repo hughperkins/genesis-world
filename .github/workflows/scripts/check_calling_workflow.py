@@ -5,7 +5,6 @@ import os
 import sys
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -71,9 +70,32 @@ def print_github_annotation(level: str, message: object) -> None:
 def check_calling_workflow(
     event: dict[str, Any],
     repository_name: str,
-    fetch_pulls: Callable[[str, str, str], list[dict[str, Any]]] = list_pulls,
 ) -> bool:
-    """Return whether the PR is open; reject invalid or unresolved stacks with an error."""
+    """Return whether the PR is open; reject invalid or unresolved stacks with an error.
+
+    ``event`` is the JSON payload read from GITHUB_EVENT_PATH. For example, a simplified payload for a completed
+    Quadrants wheel build looks like this (the actual event contains additional fields):
+
+    {
+        "repository": {
+            "id": 994002809,
+            "full_name": "Genesis-Embodied-AI/quadrants",
+            "default_branch": "main"
+        },
+        "workflow_run": {
+            "event": "pull_request",
+            "head_branch": "hp/runtime-handler-tuples",
+            "head_sha": "4f3d6f34ad2145eecab0ad71a927879a94e4c159",
+            "head_repository": {
+                "id": 994002809,
+                "full_name": "Genesis-Embodied-AI/quadrants",
+                "owner": {"login": "Genesis-Embodied-AI"}
+            }
+        }
+    }
+
+    This subset identifies the source branch and commit. The PR API supplies the base branch used to walk the stack.
+    """
     run = event.get("workflow_run") or {}
     if run.get("event") != "pull_request":
         event_name = run.get("event") or os.environ.get("GITHUB_EVENT_NAME", "unknown")
@@ -85,7 +107,7 @@ def check_calling_workflow(
     def lookup(head: str, state: str) -> list[dict[str, Any]]:
         """Look up PRs and add branch context to API failures."""
         try:
-            return fetch_pulls(repository_name, head, state)
+            return list_pulls(repository_name, head, state)
         except Exception as error:
             raise ValueError(f"Stack validation failed: GitHub API lookup for '{head}' failed: {error}") from error
 
