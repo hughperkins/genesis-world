@@ -95,8 +95,6 @@ jobs:
           echo "WORKFLOW_VALIDATED=true" >> "$GITHUB_ENV"
 
       - name: Require a validated workflow
-        # Run even after validation fails, so missing or false validation can never become an implicit approval.
-        if: ${{ !cancelled() }}
         env:
           CALLING_REPOSITORY: ${{ github.repository }}
           WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}

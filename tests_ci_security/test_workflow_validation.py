@@ -80,6 +80,9 @@ class WorkflowValidationTests(unittest.TestCase):
                 if status:
                     break
             contents = environment.read_text() + output.read_text()
+            # GitHub skips later steps after a failure unless their condition overrides success().
+            if status:
+                return status, contents, log
             guard = subprocess.run(
                 [
                     "bash",
@@ -114,11 +117,12 @@ class WorkflowValidationTests(unittest.TestCase):
                 self.assertIn("validator called", log)
 
     def test_failed_quadrants_validation_stays_rejected(self) -> None:
-        """Keep validation false and fail the guard when the Quadrants validator exits nonzero."""
+        """Keep validation false and stop after the Quadrants validator fails, without a redundant guard error."""
         status, outputs, log = self.run_gate("Genesis-Embodied-AI/quadrants", validator_status=1)
         self.assertNotEqual(status, 0)
         self.assertNotIn("WORKFLOW_VALIDATED=true", outputs)
-        self.assertIn("::error::Workflow caller 'Genesis-Embodied-AI/quadrants' was not validated", log)
+        self.assertIn("validator called", log)
+        self.assertNotIn("::error::Workflow caller", log)
 
     def test_unknown_callers_are_rejected(self) -> None:
         """Reject forks and unrelated repositories without running the PR validator."""
