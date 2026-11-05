@@ -180,7 +180,7 @@ def test_api_failure_context() -> None:
 
 
 def test_closed_and_merged_top() -> None:
-    """Verify closed triggering PRs are intentionally skipped, whether merged or not."""
+    """Return False for a merged or closed Quadrants PR, telling the workflow to skip its tests."""
     for merged_at in [None, "2026-11-05T00:00:00Z"]:
         assert not check(pr(1, "topic", "main", state="closed", merged_at=merged_at))
 
