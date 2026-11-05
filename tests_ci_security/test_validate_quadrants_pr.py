@@ -203,7 +203,7 @@ def test_fork_targeting_main() -> None:
 
 
 def test_wrong_event_repository() -> None:
-    """Reject a payload from another repository even when its source metadata claims to be Genesis-Embodied-AI/quadrants."""
+    """Reject another repository's payload even when its source metadata claims to be Genesis-Embodied-AI/quadrants."""
     event, _, _ = fixture(pr(1, "topic", "main"))
     event["repository"] = FORK
     with pytest.raises(ValueError, match="Expected a workflow event from"):
